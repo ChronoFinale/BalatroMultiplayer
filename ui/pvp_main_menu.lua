@@ -183,6 +183,13 @@ end
 
 -- ── Join overlays (copied from Speed's join.lua) ─────────────────────────────
 G.FUNCS.mp_pvp_join_lobby_by_code = function()
+	-- Keep a direct handle to the input's ref_table: create_text_input writes each
+	-- keystroke back into this table's `text`, and it is the ONLY reliable way to
+	-- read the typed value. (The node carrying id "mp_pvp_lobby_code_input" is the
+	-- selectable C-node, whose config has no ref_table -- so fishing it out via
+	-- get_UIE_by_ID(...).config.ref_table always came back nil and the join never
+	-- fired.)
+	MP.main_menu.lobby_code_ref = { text = "" }
 	G.FUNCS.overlay_menu({
 		definition = create_UIBox_generic_options({
 			snap_back = true,
@@ -195,7 +202,7 @@ G.FUNCS.mp_pvp_join_lobby_by_code = function()
 							{ n = G.UIT.T, config = { text = localize("k_lobby_code_cap"), scale = 0.5, colour = G.C.UI.TEXT_LIGHT, shadow = true } },
 						} },
 						{ n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
-							create_text_input({ id = "mp_pvp_lobby_code_input", ref_table = { text = "" }, ref_value = "text", prompt_text = localize("k_lobby_code_cap"), max_length = 6, all_caps = true, w = 4, h = 0.6 }),
+							create_text_input({ id = "mp_pvp_lobby_code_input", ref_table = MP.main_menu.lobby_code_ref, ref_value = "text", prompt_text = localize("k_lobby_code_cap"), max_length = 6, all_caps = true, w = 4, h = 0.6 }),
 						} },
 						{ n = G.UIT.R, config = { align = "cm", padding = 0.1 }, nodes = {
 							UIBox_button({ id = "mp_pvp_join_lobby_confirm", button = "mp_pvp_join_lobby_confirm", colour = G.C.GREEN, minw = 2, minh = 0.6, label = { localize("k_join_lobby_cap") }, scale = 0.45 }),
@@ -208,14 +215,11 @@ G.FUNCS.mp_pvp_join_lobby_by_code = function()
 end
 
 G.FUNCS.mp_pvp_join_lobby_confirm = function()
-	local code = G.OVERLAY_MENU and G.OVERLAY_MENU:get_UIE_by_ID("mp_pvp_lobby_code_input")
-	if code and code.config and code.config.ref_table then
-		local text = code.config.ref_table.text or ""
-		text = text:match("^%s*(.-)%s*$") or ""
-		if #text > 0 then
-			G.FUNCS.exit_overlay_menu()
-			MP.pvp_join_lobby(text)
-		end
+	local ref = MP.main_menu.lobby_code_ref
+	local text = (ref and ref.text or ""):match("^%s*(.-)%s*$") or ""
+	if #text > 0 then
+		G.FUNCS.exit_overlay_menu()
+		MP.pvp_join_lobby(text)
 	end
 end
 
