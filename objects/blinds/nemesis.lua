@@ -134,8 +134,16 @@ MPAPI.Blind({
 
 -- Emit the opponent-facing display state through the nemesis blind's procedural sync channel.
 -- Called from the playHand/skip transport routes, which assemble the full payload.
+--
+-- Resolve the nemesis blind by its stable key rather than "whatever blind is currently
+-- active": a skip fires while the ACTIVE blind is the vanilla small/big blind being
+-- skipped (bl_mp_nemesis is only active once the boss blind starts), so gating this on
+-- G.GAME.blind silently dropped the skip's display sync -- and its SFX -- until the
+-- opponent's first hand of the boss blind (see MP.GAME.enemy.skips reconciliation in
+-- on_sync above). The nemesis blind object is registered once at load and its :sync()
+-- broadcast (MPAPI's sync bus) keys off the object itself, not whether it's active.
 function MP.sync_pvp_blind(payload)
-	local b = G.GAME.blind and G.GAME.blind.config and G.GAME.blind.config.blind
+	local b = G.P_BLINDS and G.P_BLINDS["bl_mp_nemesis"]
 	if b and b.sync then b:sync(payload) end
 end
 
