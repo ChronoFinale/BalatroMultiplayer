@@ -4,7 +4,12 @@ SMODS.Back({
 	atlas = "mp_decks",
 	pos = { x = 4, y = 0 },
 	mod_whitelist = {
+		-- "Multiplayer" is the pre-MQTT-conversion mod id (kept for back-compat with
+		-- any decks still tagged under it); "MultiplayerPvP" is the current one --
+		-- without it, this mod's own cocktail-eligible decks (b_mp_orange etc.) are
+		-- excluded from the pool.
 		Multiplayer = true,
+		MultiplayerPvP = true,
 		Cryptid = true,
 		aikoyorisshenanigans = true,
 		allinjest = true,
@@ -154,15 +159,7 @@ function MP.get_cocktail_decks(cull)
 		return G.P_CENTERS[a].order < G.P_CENTERS[b].order
 	end)
 	if cull then
-		local _ret = {}
-		for i, v in ipairs(ret) do
-			if MP.cocktail_cfg_readpos(i, true) == "1" then
-				_ret[#_ret + 1] = ret[i]
-			elseif MP.cocktail_cfg_readpos(i, true) == "2" then
-				forced[#forced + 1] = ret[i]
-			end
-		end
-		ret = _ret
+		ret, forced = MP.CocktailConfig.select(ret, MP.cocktail_cfg_get())
 	end
 	return ret, forced
 end
@@ -584,11 +581,8 @@ function MP.cocktail_cfg_readpos(pos, construct)
 end
 
 function MP.cocktail_cfg_get()
-	if MP.LOBBY.code and MP.LOBBY.deck and MP.LOBBY.deck.cocktail then
-		return MP.LOBBY.deck.cocktail
-	else
-		return MP.config.cocktail
-	end
+	local lobby_cocktail = MP.LOBBY.code and MP.LOBBY.deck and MP.LOBBY.deck.cocktail
+	return MP.CocktailConfig.resolve(lobby_cocktail, MP.config.cocktail)
 end
 
 function MP.cocktail_check_edited()
