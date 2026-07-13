@@ -11,7 +11,7 @@
 -- clients (including the host, via broadcast loopback) then apply them through the
 -- existing client handlers, so the host and guest stay in lockstep.
 
-MP.REF = MP.REF or { players = {}, first_ready_at = nil }
+MP.REF = MP.REF or { players = {}, first_ready_at = nil, match_over = false }
 
 local function is_host()
 	local lobby = MPAPI.get_current_lobby()
@@ -23,6 +23,18 @@ local function broadcast(key, params)
 	if lobby and MPAPI.ActionTypes[key] then
 		lobby:action(MPAPI.ActionTypes[key]):broadcast(params or {})
 	end
+end
+
+-- The match ends the first time a game winner is declared. Every subsequent
+-- resolution attempt (extra play_hand loopbacks, timer fails, etc. that still
+-- observe 0 lives) must NOT re-broadcast pvp_win, or clients replay the win/
+-- lose jingle and screen once per stray event instead of once per match.
+local function declare_win(winner_id)
+	if MP.REF.match_over then
+		return
+	end
+	MP.REF.match_over = true
+	broadcast("pvp_win", { winner_id = winner_id })
 end
 
 local function ref_player(id)
@@ -84,6 +96,7 @@ function MP.referee_reset(starting_lives)
 	end
 	MP.REF.players = {}
 	MP.REF.first_ready_at = nil
+	MP.REF.match_over = false
 	MP._result_reported = false
 	local lives = starting_lives or MP.LOBBY.config.starting_lives or 4
 	for _, id in ipairs(both_players()) do
@@ -152,6 +165,9 @@ end
 -- score/hands are updated. Ends the round when the trailing player is out of hands
 -- or both are, decided by InsaneInt score with exact-equality = draw.
 local function try_resolve_round()
+	if MP.REF.match_over then
+		return
+	end
 	local ids = both_players()
 	if #ids < 2 then
 		return
@@ -180,7 +196,7 @@ local function try_resolve_round()
 			local game_loser = (game_winner.id == a.id) and b or a
 			winner.first_ready = false
 			loser.first_ready = false
-			broadcast("pvp_win", { winner_id = game_winner.id })
+			declare_win(game_winner.id)
 			return
 		end
 	end
@@ -238,7 +254,7 @@ function MP.referee_on_set_furthest_blind(from, params)
 		local opp = opponent_of(from)
 		local enemy = opp and ref_player(opp)
 		if enemy and enemy.lives == 0 and pl.furthest_blind > enemy.furthest_blind then
-			broadcast("pvp_win", { winner_id = from })
+			declare_win(from)
 		end
 	end
 end
@@ -265,13 +281,13 @@ function MP.referee_on_fail_round(from)
 		if MP.LOBBY.config.gamemode == "gamemode_mp_survival" then
 			local enemy = opp and ref_player(opp)
 			if enemy and pl.furthest_blind == enemy.furthest_blind then
-				broadcast("pvp_win", { winner_id = "*draw*" })
+				declare_win("*draw*")
 			else
 				local winner = (enemy and pl.furthest_blind < enemy.furthest_blind) and opp or from
-				broadcast("pvp_win", { winner_id = winner })
+				declare_win(winner)
 			end
 		else
-			broadcast("pvp_win", { winner_id = opp })
+			declare_win(opp)
 		end
 	end
 end
@@ -284,7 +300,7 @@ function MP.referee_on_fail_timer(from)
 	local pl = ref_player(from)
 	lose_life(pl)
 	if pl.lives == 0 then
-		broadcast("pvp_win", { winner_id = opponent_of(from) })
+		declare_win(opponent_of(from))
 	end
 end
 
@@ -296,7 +312,7 @@ function MP.referee_on_fail_pvp_timer(from)
 	local pl = ref_player(from)
 	lose_life(pl)
 	if pl.lives == 0 then
-		broadcast("pvp_win", { winner_id = opponent_of(from) })
+		declare_win(opponent_of(from))
 	else
 		pl.first_ready = false
 		local opp = opponent_of(from)
