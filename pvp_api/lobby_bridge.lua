@@ -75,6 +75,42 @@ local function mirror_players(lobby)
 	end
 end
 
+-- Effectful counterpart to MP.decide_departure_action's "start_grace" /
+-- "cancel_grace" outcomes, and to the grace-expiry forfeit (there is no
+-- server anymore to send `stopGame` on timeout -- see disconnect_grace.lua).
+local function handle_departure_event(lobby, event, player_id)
+	if player_id == nil or player_id == lobby.player_id then
+		return -- not the opponent (1v1: the only other player_id is the opponent)
+	end
+	local state = {
+		is_opponent = true,
+		in_run = G.STAGE == G.STAGES.RUN,
+		grace_active = MP.enemy_disconnect_countdown ~= nil,
+	}
+	local action = MP.decide_departure_action(event, state)
+	if action == "start_grace" then
+		MP.dispatch_action("enemyDisconnected", { player_id = player_id })
+	elseif action == "cancel_grace" then
+		MP.dispatch_action("enemyReconnected", { player_id = player_id })
+	end
+end
+
+-- Called from the grace-countdown expiry tick (networking/action_handlers.lua)
+-- once its own single-fire guard (MP.disconnect_grace_expired) says go.
+-- Reuses the existing host-authoritative forfeit path (pvp_api/gamemodes.lua
+-- on_player_forfeit -> check_single_survivor -> broadcast pvp_player_won) so
+-- there is exactly one way a departure ever ends a match.
+function MP.resolve_enemy_disconnect_forfeit(player_id)
+	if not player_id then
+		return
+	end
+	local lobby = MPAPI.get_current_lobby()
+	local gm = lobby and lobby.get_gamemode_instance and lobby:get_gamemode_instance()
+	if gm and gm.on_player_forfeit then
+		gm:on_player_forfeit(player_id)
+	end
+end
+
 MP.setup_lobby_mirror = function(lobby)
 	MP.CURRENT_LOBBY = lobby
 	MP.LOBBY.code = lobby.code
@@ -124,12 +160,19 @@ MP.setup_lobby_mirror = function(lobby)
 			MP.lobby.seed_votes:remove(player_id)
 		end
 		mirror_players(lobby)
-		-- The gamemode's forfeit hook (host-authoritative) handles a mid-match leave.
-		local gm = lobby.get_gamemode_instance and lobby:get_gamemode_instance()
-		if gm and gm.on_player_forfeit and G.STAGE == G.STAGES.RUN then
-			gm:on_player_forfeit(player_id)
-		end
+		-- Mid-run: never forfeit instantly here -- `player_left` can equally mean a
+		-- deliberate leave or an ungraceful drop (see disconnect_grace.lua). Pause
+		-- and wait out the grace period; only its expiry ends the match.
+		handle_departure_event(lobby, MPAPI.LobbyEvent.PLAYER_LEFT, player_id)
 		refresh()
+	end)
+
+	lobby:on(MPAPI.LobbyEvent.PLAYER_DISCONNECTED, function(player_id)
+		handle_departure_event(lobby, MPAPI.LobbyEvent.PLAYER_DISCONNECTED, player_id)
+	end)
+
+	lobby:on(MPAPI.LobbyEvent.PLAYER_RECONNECTED, function(player_id)
+		handle_departure_event(lobby, MPAPI.LobbyEvent.PLAYER_RECONNECTED, player_id)
 	end)
 
 	lobby:on(MPAPI.LobbyEvent.METADATA_CHANGED, function(metadata)
